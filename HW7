@@ -1,0 +1,562 @@
+function [trained_model, history] = train_cnn_model(imgs_train, y_train_cat)
+%train_CNN_model Trains a CNN model with the given architecture. It trains a CNN with the specified architecture, displays model summary,
+%   and plots training accuracy vs epoch
+
+    % Defining CNN architecture exactly as specified in the assignment
+    layers = [
+        imageInputLayer([32 32 1])
+        
+        convolution2dLayer(3, 32)  % 3x3 kernel, 32 filters, default padding [0 0 0 0]
+        reluLayer
+        maxPooling2dLayer(2, 'Stride', 2)
+        
+        convolution2dLayer(5, 32)  % 5x5 kernel, 32 filters, default padding [0 0 0 0]
+        reluLayer
+        maxPooling2dLayer(2, 'Stride', 2)
+        
+        flattenLayer
+        fullyConnectedLayer(3)     % 3 output classes
+        softmaxLayer
+    ];
+    
+    % For visualization only - the layers without classification layer
+    analyzeNetwork(layers);
+    print('output/ps7-1-e-1.png', '-dpng');
+    fprintf('Saved model summary as ps7-1-e-1.png\n');
+    
+    % Adding classification layer for training
+    layers_full = [
+        layers
+        classificationLayer
+    ];
+    
+    % Defining the training options
+    options = trainingOptions('sgdm', ...
+        'MaxEpochs', 15, ...
+        'MiniBatchSize', 150, ...
+        'Plots', 'training-progress', ...
+        'Verbose', false);
+    
+    % Training the network
+    fprintf('Training CNN model...\n');
+    [trained_model, history] = trainNetwork(imgs_train, y_train_cat, layers_full, options);
+    
+    % Plotting training accuracy vs epoch
+    figure;  %New window
+    plot(history.TrainingAccuracy);
+    xlabel('Epoch'); %Label x axis
+    ylabel('Accuracy');  %Label y axis
+    title('Training Accuracy vs Epoch');  %The title of the plot
+    grid on;  %Adding grid lines
+    
+    % Saving the figure
+    saveas(gcf, 'output/ps7-1-e-2.png');
+    fprintf('Saved training accuracy plot as ps7-1-e-2.png\n');  %Printing the line for the organization
+    
+    % Getting training accuracy
+    training_accuracy = history.TrainingAccuracy(end);
+    fprintf('Final training accuracy: %.2f%%\n', training_accuracy);
+end
+function detect_cars_with_sliding_window(model)
+%detect_cars_with_sliding_window detects cars in test images using sliding window.   It uses a trained CNN model and sliding window approach to detect cars in test images
+
+    % Defining the test directory
+    test_dir = 'input/p2/test_imgs';
+    
+    % Getting all test images
+    files = dir(fullfile(test_dir, '*.jpg'));
+    n_files = length(files);
+    
+    % Setting detection threshold
+    threshold = 0.6;
+    
+    % For each test image
+    for k = 1:n_files
+        % Reading test image
+        img_path = fullfile(test_dir, files(k).name);
+        fprintf('Processing test image %d/%d: %s\n', k, n_files, files(k).name);
+        
+        try
+            img = imread(img_path);
+            
+            % Getting image dimensions
+            [img_height, img_width, ~] = size(img);
+            
+            % Defining window size
+            window_height = 96;
+            window_width = 32;
+            
+            % Calculating valid positions for window
+            max_i = img_height - window_height + 1;
+            max_j = img_width - window_width + 1;
+            
+            % Using stride to reduce computation
+            stride = 16;  
+            
+            % Verifying the window dimensions work with the image
+            if max_i <= 0 || max_j <= 0
+                fprintf('  Warning: Image too small for window size. Skipping.\n');
+                continue;
+            end
+            
+            % Initializing arrays to store detection results
+            all_probs = [];
+            all_positions = [];
+            
+            % Testing the model on a simple case - if model is working properly
+            % Creating a test window
+            test_window = img(1:min(window_height, img_height), 1:min(window_width, img_width), :);
+            
+            % Making sure test window has right dimensions
+            if size(test_window, 1) ~= window_height || size(test_window, 2) ~= window_width
+                test_window = imresize(test_window, [window_height, window_width]);
+            end
+            
+            % Trying classifying the test window
+            try
+                [test_label, test_scores] = classify(model, test_window);
+                fprintf('  Test window classification: Label=%s, Scores=[%.4f, %.4f]\n', ...
+                    char(test_label), test_scores(1), test_scores(2));
+            catch ME
+                fprintf('  Error classifying test window: %s\n', ME.message);
+                % Trying to continue anyway
+            end
+            
+            % Sliding window across the image
+            for i = 1:stride:max_i
+                for j = 1:stride:max_j
+                    % Extracting the window
+                    window = img(i:(i+window_height-1), j:(j+window_width-1), :);
+                    
+                    try
+                        % Classifying the window
+                        [label, scores] = classify(model, window);
+                        
+                        % Getting probability of being a car (class 1)
+                        car_prob = double(scores(2));  
+                        
+                        % Storing positions with significant car probability
+                        if car_prob > 0.3  % Store all windows with reasonable probability
+                            all_probs = [all_probs; car_prob];
+                            all_positions = [all_positions; i j];
+                        end
+                    catch ME
+                        fprintf('  Error processing window at (%d,%d): %s\n', i, j, ME.message);
+                    end
+                end
+            end
+            
+            % Finding all detections above threshold
+            if ~isempty(all_probs)
+                % Sorting by probability (descending)
+                [sorted_probs, sort_idx] = sort(all_probs, 'descend');
+                sorted_positions = all_positions(sort_idx, :);
+                
+                % Getting the best detection
+                best_prob = sorted_probs(1);
+                best_i = sorted_positions(1, 1);
+                best_j = sorted_positions(1, 2);
+                
+                % Creating result image
+                figure;
+                imshow(img);
+                title(sprintf('Test Image %d: %s', k, files(k).name));
+                
+                % Only showing detection if above threshold
+                if best_prob > threshold
+                    % Drawing the rectangle at best position
+                    rectangle('Position', [best_j, best_i, window_width, window_height], ...
+                        'EdgeColor', 'b', 'LineWidth', 2);
+                    
+                    % Adding the label
+                    text(best_j, best_i-10, sprintf('Car: %.2f', best_prob), ...
+                        'Color', 'b', 'FontWeight', 'bold', 'FontSize', 12, 'BackgroundColor', 'w');
+                    
+                    fprintf('  Car detected at position (%d, %d) with probability %.2f\n', ...
+                        best_i, best_j, best_prob);
+                    
+                    % Saving the detected window for verification
+                    detected_window = img(best_i:(best_i+window_height-1), best_j:(best_j+window_width-1), :);
+                    figure('Visible', 'off');  %New window
+                    imshow(detected_window);
+                    saveas(gcf, sprintf('output/detected_window_%d.png', k));
+                    close;
+                else
+                    fprintf('  No car detected above threshold (best: %.2f)\n', best_prob);
+                end
+            else
+                % No potential detections
+                figure;
+                imshow(img);
+                title(sprintf('Test Image %d: No Detection', k));
+                fprintf('  No potential car detections found\n');
+            end
+            
+            % Saving the result image
+            saveas(gcf, sprintf('output/ps7-2-c-%d.png', k));
+            fprintf('  Saved detection result as ps7-2-c-%d.png\n', k);
+            close;
+            
+        catch ME
+            fprintf('  Error processing image %s: %s\n', img_path, ME.message);
+        end
+    end
+end
+function [imgs_trian, y_train] = load_car_detection_data()
+%load_car_detection_data loads car detection training images. It Loads training images for car detection task, where filenames starting
+%   with 1 are cars (label 1) and filenames starting with 0 are non-cars (label 0)
+
+    % Defining the training directory
+    train_dir = 'input/p2/train_imgs';
+    
+    % Checking if directory exists
+    if ~exist(train_dir, 'dir')
+        error('Training directory %s does not exist', train_dir);
+    end
+    
+    % Getting all files in the training directory
+    files = dir(fullfile(train_dir, '*.jpg'));
+    n_files = length(files);
+    
+    if n_files == 0
+        error('No jpg files found in %s', train_dir);
+    end
+    
+    fprintf('Found %d training images\n', n_files);
+    
+    % Initializing arrays for images and labels
+    imgs_trian = zeros(96, 32, 3, n_files, 'uint8');
+    y_train = zeros(n_files, 1);
+    
+    % Keeping track of car and non-car examples for visualization
+    car_examples = [];
+    noncar_examples = [];
+    
+    % Loading each image and assign label
+    for i = 1:n_files
+        % Reading the image
+        img_path = fullfile(train_dir, files(i).name);
+        
+        if ~exist(img_path, 'file')
+            warning('File does not exist: %s', img_path);
+            continue;
+        end
+        
+        try
+            img = imread(img_path);
+            
+            % Checking the image size
+            if size(img, 1) ~= 96 || size(img, 2) ~= 32
+                warning('Image size incorrect: %s. Expected 96x32, got %dx%d', ...
+                    img_path, size(img, 1), size(img, 2));
+                img = imresize(img, [96, 32]);
+            end
+            
+            % Ensuring the image has 3 channels
+            if size(img, 3) ~= 3
+                warning('Image does not have 3 channels: %s', img_path);
+                if size(img, 3) == 1
+                    img = repmat(img, [1, 1, 3]);
+                end
+            end
+            
+            % Storing the image
+            imgs_trian(:,:,:,i) = img;
+            
+            % Assigning label based on filename
+            if files(i).name(1) == '1'
+                y_train(i) = 1;  % Car
+                car_examples = [car_examples, i];
+            else
+                y_train(i) = 0;  % No car
+                noncar_examples = [noncar_examples, i];
+            end
+        catch ME
+            warning('Error reading image %s: %s', img_path, ME.message);
+        end
+    end
+    
+    % Converting the labels to categorical (required for training)
+    y_train = categorical(y_train);
+    
+    % Displaying some information
+    fprintf('Loaded %d training images for car detection\n', n_files);
+    fprintf('Size of imgs_trian: %d x %d x %d x %d\n', size(imgs_trian));
+    fprintf('Number of car images: %d\n', sum(y_train == '1'));
+    fprintf('Number of non-car images: %d\n', sum(y_train == '0'));
+    
+    % Displaying sample images
+    figure;
+    
+    % Checking if any car examples were found
+    if ~isempty(car_examples)
+        % Displaying the car examples
+        subplot(2, 2, 1);
+        imshow(imgs_trian(:,:,:,car_examples(1)));
+        title('Car Example 1');
+        
+        if length(car_examples) > 1
+            subplot(2, 2, 2);
+            imshow(imgs_trian(:,:,:,car_examples(2)));
+            title('Car Example 2');
+        end
+    else
+        warning('No car examples found in the dataset!');
+    end
+    
+    % Checking if any non-car examples were found
+    if ~isempty(noncar_examples)
+        % Displaying non-car examples
+        subplot(2, 2, 3);
+        imshow(imgs_trian(:,:,:,noncar_examples(1)));
+        title('Non-Car Example 1');
+        
+        if length(noncar_examples) > 1
+            subplot(2, 2, 4);
+            imshow(imgs_trian(:,:,:,noncar_examples(2)));
+            title('Non-Car Example 2');
+        end
+    else
+        warning('No non-car examples found in the dataset!');
+    end
+    
+    % Saving the sample image figure
+    saveas(gcf, 'output/ps7-2-a-1.png');
+    fprintf('Saved sample car/non-car images as ps7-2-a-1.png\n');
+    
+    % Verifying image loading by saving a few examples
+    for i = 1:min(4, n_files)
+        figure('Visible', 'off');
+        if i <= length(car_examples) && ~isempty(car_examples)
+            imshow(imgs_trian(:,:,:,car_examples(i)));
+            title(sprintf('Car Verification %d', i));
+            saveas(gcf, sprintf('output/car_verification_%d.png', i));
+        elseif i <= length(noncar_examples) && ~isempty(noncar_examples)
+            imshow(imgs_trian(:,:,:,noncar_examples(i)));
+            title(sprintf('Non-Car Verification %d', i));
+            saveas(gcf, sprintf('output/noncar_verification_%d.png', i));
+        end
+        close;
+    end
+end
+% ECE 1395 - Spring 2025 - Homework Assignment 7: Image Recognition
+% Omar Morsy
+
+% Making sure the output directory exists
+if ~exist('output', 'dir')
+    mkdir('output');
+end
+
+% Part 1: Image recognition using convolution neural networks (CNN)
+
+% 1.a - Loading the data and splitting into training and test sets
+[X_train, y_train, X_test, y_test] = split_data();
+
+% 1.b - Reshaping the training data and displaying 9 random images
+imgs_train = reshape_train_data(X_train);
+
+% 1.c - Reshaping test data and display 4 random images
+imgs_test = reshape_test_data(X_test);
+
+% 1.d - Converting the labels to categorical arrays
+y_train_cat = categorical(y_train);
+y_test_cat = categorical(y_test);
+
+% 1.e - Training CNN model
+[trained_model, training_history] = train_cnn_model(imgs_train, y_train_cat);
+
+% 1.f - Testing CNN model performance
+test_cnn_model(trained_model, imgs_test, y_test_cat);
+
+% Part 2: Window based recognition
+
+% 2.a - Loading the training images for car detection
+[imgs_trian, y_train] = load_car_detection_data();
+
+% 2.b - Training CNN model for car detection
+[car_model, car_training_history] = train_car_detection_model(imgs_trian, y_train);
+
+% 2.c - Detecting the cars in test images using sliding window
+detect_cars_with_sliding_window(car_model);
+function imgs_test = reshape_test_data(X_test)
+%reshape_test_data reshape test data into 32x32x1xN format. It reshapes flattened test data into image format and displays 4 random images
+
+    % Getting the number of test examples
+    n_test = size(X_test, 1);
+    
+    % Reshaping the data from 2000x1024 to 32x32x1x2000
+    imgs_test = reshape(X_test', [32, 32, 1, n_test]);
+    
+    % Displaying 4 random images in a 2x2 grid
+    figure;  %New window
+    rng(43); % For reproducibility
+    rand_indices = randperm(n_test, 4);
+    
+    for i = 1:4  %For loop
+        subplot(2, 2, i); %Creating subplot
+        imshow(imgs_test(:,:,:,rand_indices(i)), []);
+        
+        % Adding the label information if available
+        title(sprintf('Example %d', i));
+    end
+    
+    % Saving the figure
+    saveas(gcf, 'output/ps7-1-c-1.png');
+    fprintf('Saved figure as ps7-1-c-1.png\n');  %Printing this line foe organization
+end
+function imgs_train = reshape_train_data(X_train)
+%reshape_train_data Reshape training data into 32x32x1xN format. It reshapes flattened training data into image format and displays 9 random images
+
+    % Getting the number of training examples
+    n_train = size(X_train, 1);
+    
+    % Reshaping the the data from 13000x1024 to 32x32x1x13000
+    imgs_train = reshape(X_train', [32, 32, 1, n_train]);
+    
+    % Displaying 9 random images in a 3x3 grid
+    figure;  %New window
+    rng(42); % For reproducibility
+    rand_indices = randperm(n_train, 9);
+    
+    for i = 1:9  %For loop
+        subplot(3, 3, i);
+        imshow(imgs_train(:,:,:,rand_indices(i)), []);
+        
+        % Adding the label information if available
+        title(sprintf('Example %d', i));
+    end
+    
+    % Saving the figure
+    saveas(gcf, 'output/ps7-1-b-1.png');
+    fprintf('Saved figure as ps7-1-b-1.png\n');   %Printing this line for organization
+end
+function [X_train, y_train, X_test, y_test] = split_data()
+%split_data Load and split data into training and test sets. It loads data from HW6_Data2_full.mat and splits it into training (13000)
+%   and testing (2000) sets randomly
+
+    % Loading the data
+    load('input/HW6_Data2_full.mat');
+    
+    % Making sure X and y_labels exist in the loaded data
+    if ~exist('X', 'var') || ~exist('y_labels', 'var')
+        error('Data file does not contain X or y_labels');
+    end
+    
+    % Getting the total number of samples
+    n_samples = size(X, 1);
+    
+    % Setting the random seed for reproducibility
+    rng(42);
+    
+    % Generating random indices for training
+    train_indices = randperm(n_samples, 13000);
+    
+    % All indices
+    all_indices = 1:n_samples;
+    
+    % Finding test indices (those not in train_indices)
+    test_indices = setdiff(all_indices, train_indices);
+    
+    % Splitting the data
+    X_train = X(train_indices, :);
+    y_train = y_labels(train_indices);
+    X_test = X(test_indices, :);
+    y_test = y_labels(test_indices);
+    
+    % Displaying the information
+    fprintf('X_train size: %d x %d\n', size(X_train));
+    fprintf('y_train size: %d x %d\n', size(y_train));
+    fprintf('X_test size: %d x %d\n', size(X_test));
+    fprintf('y_test size: %d x %d\n', size(y_test));
+end
+function test_cnn_model(trained_model, imgs_test, y_test_cat)
+%test_CNN_model tests CNN model performance on test data. It tests the trained CNN model on test data and reports accuracy
+
+    % Getting the predictions
+    fprintf('Testing CNN model on test data...\n');  %Printing this line
+    Y_pred = classify(trained_model, imgs_test);
+    
+    % Calculating the accuracy
+    accuracy = sum(Y_pred == y_test_cat) / length(y_test_cat);
+    
+    % Displaying the accuracy
+    fprintf('Test accuracy: %.2f%%\n', accuracy * 100);
+    
+    % Displaying the confusion matrix
+    figure;  %New window
+    confusionchart(y_test_cat, Y_pred);
+    title('Confusion Matrix for Test Data');  %The title
+    
+    % Saving the figure
+    saveas(gcf, 'output/ps7-1-f-1.png');
+    fprintf('Saved confusion matrix as ps7-1-f-1.png\n');  %Printing this line for organization
+end
+function [trained_model, history] = train_car_detection_model(imgs_trian, y_train)
+%train_car_detection_model trains CNN model for car detection.   It trains a CNN model to detect cars in images
+
+    % Defining CNN architecture for car detection
+    layers = [
+        imageInputLayer([96 32 3])  %Deep learning toolbox
+        
+        convolution2dLayer(3, 16, 'Padding', 'same')
+        batchNormalizationLayer
+        reluLayer
+        maxPooling2dLayer(2, 'Stride', 2)
+        
+        convolution2dLayer(3, 32, 'Padding', 'same')
+        batchNormalizationLayer
+        reluLayer
+        maxPooling2dLayer(2, 'Stride', 2)
+        
+        convolution2dLayer(3, 64, 'Padding', 'same')
+        batchNormalizationLayer
+        reluLayer
+        maxPooling2dLayer(2, 'Stride', 2)
+        
+        fullyConnectedLayer(64)
+        reluLayer
+        dropoutLayer(0.5)
+        
+        % Changing this to match the number of classes (2)
+        fullyConnectedLayer(2)  % Changed from 1 to 2
+        softmaxLayer
+        classificationLayer
+    ];
+    
+    % Defining the training options
+    options = trainingOptions('adam', ...
+        'MaxEpochs', 20, ...
+        'MiniBatchSize', 32, ...
+        'InitialLearnRate', 0.001, ...
+        'Plots', 'training-progress', ...
+        'Verbose', false);
+    
+    % Training the network
+    fprintf('Training car detection CNN model...\n');
+    [trained_model, history] = trainNetwork(imgs_trian, y_train, layers, options);
+    
+    % Plotting training accuracy vs epoch
+    figure;  %New window
+    plot(history.TrainingAccuracy);  %Plotting
+    xlabel('Epoch');
+    ylabel('Accuracy');
+    title('Car Detection Training Accuracy');  %The title of the plot 
+    grid on;
+    
+    % Saving the figure
+    saveas(gcf, 'output/ps7-2-b-1.png');
+    fprintf('Saved car detection training accuracy plot as ps7-2-b-1.png\n');  %Printing this line for organization
+    
+    % Getting training accuracy
+    training_accuracy = history.TrainingAccuracy(end);
+    fprintf('Final car detection training accuracy: %.2f%%\n', training_accuracy);
+    
+    % Displaying model structure
+    fprintf('Car detection model structure:\n');
+    fprintf('- Input layer: 96x32x3\n');
+    fprintf('- 3 convolutional blocks with 16, 32, and 64 filters\n');
+    fprintf('- Each block includes batch normalization, ReLU, and max pooling\n');
+    fprintf('- Fully connected layer with 64 units\n');
+    fprintf('- Dropout layer with 50%% dropout rate\n');
+    fprintf('- Output layer: 2 units with softmax activation\n');
+end
