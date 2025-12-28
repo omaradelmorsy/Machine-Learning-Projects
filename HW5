@@ -1,0 +1,513 @@
+function [T, labels] = constructImageMatrix(img_dir)
+%  Creating a matrix of face images
+%   Each column represents one flattened image
+%Inputs:  img_dir - directory containing images
+% Outputs: T      - 10304 x N matrix, where N is the number of images
+%   labels - N x 1 vector, containing subject IDs
+
+% Getting list of all images in the directory
+img_files = dir(fullfile(img_dir, '*.pgm'));  % Getting all .pgm files from the specified directory
+num_images = length(img_files);  % Counting how many image files were found
+
+% Initializing matrix T and labels vector
+% Each face image is 112x92 = 10304 pixels
+img_height = 112;  % Setting the expected height of each face image
+img_width = 92;  % Setting the expected width of each face image
+img_size = img_height * img_width;  % Calculating the total number of pixels in each image
+ 
+T = zeros(img_size, num_images);  % Initializing matrix T with zeros, with 10304 rows and num_images columns
+labels = zeros(num_images, 1);  % Initializing the labels vector with zeros, one entry per image
+
+% Reading each image, flattening it, and storing as a column in T
+for i = 1:num_images  % Starting a loop that will process each image file
+    img_file = img_files(i).name;  % Getting the filename of the current image
+    img_path = fullfile(img_dir, img_file);  % Constructing the full path to the image
+    
+    % Reading image
+    img = imread(img_path);  % Reading the image file into the img variable
+    
+    % Flattening image to column vector
+    img_vec = double(img(:));  % Converting the image to a column vector and to double precision
+    
+    % Storing in matrix T
+    T(:, i) = img_vec;  % Storing the flattened image as the ith column in matrix T
+    
+    % Extracting person ID from filename
+    % Filename format is "PersonID_X_TrainImg/TestImg_Y.pgm"
+    parts = strsplit(img_file, '_');  % Splitting the filename at each underscore
+    person_id = str2double(parts{2});  % Converting the second part to a number (person ID)
+    labels(i) = person_id;  % Storing the person ID in the labels vector
+end  % The end of the for loop
+end  % The end of the function
+function displayRandomFaces()
+% This fuction to display three random training face images with their IDs
+
+    % Getting the list of all training images
+    train_files = dir('input/train/*.pgm');  %Getting a list of all .pgm image files
+    num_files = length(train_files);  %to store how many files were found 
+    
+    % Checking if there are enough files
+    if num_files < 3  %the start of if statement    
+        error('Not enough training images found (need at least 3, found %d)', num_files);  %we need at least three 
+    end  %the end of if statement
+    
+    % Selecting 3 random indices  (which images to display)
+    random_indices = randperm(num_files, 3);
+    
+    % Creating the figure with 1x3 subplot
+    figure;  %new figure window
+    
+    for i = 1:3  %starting the for loop runs three times once for each image to display
+        idx = random_indices(i); %This gets ith random index that was generated earlier
+        img_file = train_files(idx).name; %This gets the file name of the image at the selected index
+        
+        % Extracting person ID from filename
+        % Filename format is "PersonID_X_TrainImg_Y.pgm"
+        try  %starting try catch
+            parts = strsplit(img_file, '_'); %This splits the filename at each underscore character creating an array of parts 
+            person_id = str2double(parts{2}); %This converts the second part of the file name to a number 
+        catch  %if an error occurs
+            person_id = 0; % Default if parsing fails
+            fprintf('Warning: Could not parse person ID from filename: %s\n', img_file); %displaying that warning
+        end  %The end of try catch
+        
+        % Reading and displaying image
+        img_path = fullfile('input/train', img_file); %Constructing the full path
+        try  %starting try catch
+            img = imread(img_path); %reading the image file 
+        catch
+            % Creating a placeholder image if reading fails
+            img = uint8(ones(112, 92) * 128);
+            fprintf('Warning: Could not read image file: %s\n', img_path);  %Displaying warning
+        end  %end of try catch
+        
+        subplot(1, 3, i); %Creating 1x3 subplot
+        imshow(img);  %Display the image on the plot
+        title(sprintf('Person ID: %d', person_id)); %Adding a tittle 
+    end  %The end of for loop
+    
+    % Adding overall title and saving the figure
+    sgtitle('Random Training Face Images');
+    
+    % Ensuring output directory exists
+    if ~exist('output', 'dir')
+        mkdir('output'); %If it does not exist create it 
+    end  %the end of if
+    
+    % Saving the figure
+    saveas(gcf, 'output/ps5-2-0.png');
+    fprintf('Saved random faces image to output/ps5-2-0.png\n'); %Displaying that line 
+end  %the end of the function
+function processATTDataset()
+% Splitting AT&T face dataset into training and testing sets
+%   It takes 8 random images per subject for training and 2 for testing
+
+    fprintf('Looking for AT&T dataset in input/all directory...\n');  %Displaying that line
+    
+    % Checking if the directory exists
+    if ~exist('input/all', 'dir')
+        error('Directory input/all does not exist. Please create it and extract the AT&T dataset there.');  %Error if not exist
+    end  %end if statement
+    
+    % Getting a list of all subject directories
+    subject_dirs = dir('input/all/s*');
+    
+    % Checking if there are any subject directories
+    if isempty(subject_dirs)  %If is empty
+        fprintf('No subject directories (s1, s2, etc.) found in input/all.\n');  %displaying that line if is empty
+        fprintf('Please make sure you have extracted the AT&T dataset correctly.\n');  %Displaying that line 
+        error('Cannot continue without the AT&T dataset. Please download and extract it to input/all.');  %Stop execution with error
+    end  %The end of if statement
+    
+    % Clearing the existing files in train and test directories
+    if exist('input/train', 'dir')
+        delete('input/train/*.pgm');  %clearing train
+    else
+        mkdir('input/train'); %if not exist creating it 
+    end %the end of if else statement
+    
+    if exist('input/test', 'dir')
+        delete('input/test/*.pgm');  %Clearing test 
+    else
+        mkdir('input/test'); %If not exist create it 
+    end %the end of if else statement 
+    
+    % Looping through each subject directory
+    total_train = 0; %Initializing the total train
+    total_test = 0; %Initializing the total test
+    
+    fprintf('Processing subjects: ');  %Displaying that line
+    for i = 1:length(subject_dirs)  %Starting for loop will process each subject directory
+        if mod(i, 5) == 0  %Checking if the current subject index is divisible by 4
+            fprintf('%d...', i);  %Printing the current subject
+        end %the end of if
+        
+        subject_dir = subject_dirs(i).name; %Getting the name of the current subject directory 
+        person_id = str2double(subject_dir(2:end)); % Extracting subject number
+        
+        % Getting all images for this subject
+        img_files = dir(fullfile('input/all', subject_dir, '*.pgm'));
+        num_images = length(img_files);  %how many images were found for this subject
+        
+        if num_images == 0  %starting if statement if there is no images
+            fprintf('\nWarning: No images found for subject %s\n', subject_dir); %displaying warning message
+            continue;
+        end %the end of if statement
+        
+        % Determining how many images to use for training
+        num_train = min(8, num_images - 1);  % Ensuring at least 1 for testing
+        
+        % Randomly selecting images for training
+        train_indices = randperm(num_images, num_train);
+        test_indices = setdiff(1:num_images, train_indices); %which indices were not selected for training to use for testing
+        
+        % Copying the training images
+        for j = 1:length(train_indices) % starting inner for loop
+            img_idx = train_indices(j);  %Getting the index of the current training image 
+            img_file = img_files(img_idx).name;  %Getting the filename of the current training image
+            src_path = fullfile('input/all', subject_dir, img_file);  %Constructing the full path to the source image 
+            dst_name = sprintf('PersonID_%d_TrainImg_%d.pgm', person_id, j); %Creating a new filename for the destination that includes the person ID
+            dst_path = fullfile('input/train', dst_name); %Constructing the full path to the destination
+            copyfile(src_path, dst_path);  %Copying the image from the source path to the destination path 
+            total_train = total_train + 1; %Incrementing the counter of the training images
+        end  %The end of the inner for loop
+        
+        % Copying the testing images
+        for j = 1:length(test_indices)  %Another inner for loop
+            img_idx = test_indices(j); %Getting the index of the current testing image
+            img_file = img_files(img_idx).name; %Getting the filename of the current testing image
+            src_path = fullfile('input/all', subject_dir, img_file); %Constructing the full path to the source image
+            dst_name = sprintf('PersonID_%d_TestImg_%d.pgm', person_id, j); %Creating a new filename for the destination that includes the person ID
+            dst_path = fullfile('input/test', dst_name);  %Constructing the full path to the destination
+            copyfile(src_path, dst_path); %Copying the image from the source path to the destination path 
+            total_test = total_test + 1;  %Incrementing the counter of the training images
+        end %The end of the inner for loop 
+    end  % the ending of outer for loop
+    
+    fprintf('\nDataset splitting complete!\n');  %Displaying that line
+    fprintf('Created %d training and %d testing images.\n', total_train, total_test); %Printing how many training and testing images were created 
+    
+    % If we didn't create enough images, stop execution
+    if total_train < 10 || total_test < 3  %Starting if statement
+        error('Not enough images were processed. Please check that the AT&T dataset is properly extracted.');
+    end 
+end
+%Omar Morsy
+%ECE 1395
+
+%HW5
+
+
+% Part 1 - Weighted KNN
+
+% 1.a. I implemented the function in weightedKNN.m
+
+% 1.b. Testing with different sigma values
+% Loading the dataset from the previous assignment (hw4)
+load('hw4_data3.mat');  % Loading the dataset that contains X_train, y_train, X_test, and y_test
+
+% Testing the sigma values
+sigma_values = [0.01, 0.07, 0.15, 1.5, 3, 4.50];  %Definning the sigma values for testing
+accuracies = zeros(size(sigma_values)); %Initializing the accuracy array to store results for each sigma
+
+fprintf('Part 1.b - Weighted KNN Results:\n');  %Displaying that line as header
+fprintf('Sigma\tAccuracy (%%)\n');  %Displaying that line for column headers
+fprintf('---------------------\n');  %Displaying that line as separator
+
+for i = 1:length(sigma_values)  %Starting the for loop to test each sigma value
+   sigma = sigma_values(i);  %Getting the current sigma value to test
+   
+   % Applying the weightedKNN function
+   y_predict = weightedKNN(X_train, y_train, X_test, sigma);  %Calling the function with current sigma
+   
+   % Calculating the accuracy
+   accuracy = sum(y_predict == y_test) / length(y_test) * 100;  %Calculating percentage of correct predictions
+   accuracies(i) = accuracy;  %Storing the accuracy for current sigma
+   
+   % Printing the results
+   fprintf('%.2f\t%.2f\n', sigma, accuracy);  %Displaying sigma and its corresponding accuracy
+end  %Ending the for loop
+
+% Finding the best sigma
+[best_accuracy, best_idx] = max(accuracies);  %Finding the highest accuracy and its index
+best_sigma = sigma_values(best_idx);  %Getting the sigma value that gave best accuracy
+fprintf('\nBest sigma: %.2f with accuracy: %.2f%%\n\n', best_sigma, best_accuracy);  %displaying the best sigma with accuracy
+
+% Part 2 - PCA and Face Recognition
+
+% 2.0 Data Preprocessing
+
+% Creating necessary directories if they don't exist
+if ~exist('input', 'dir')  %for input folder - checking if it exists
+   mkdir('input');  %Creating input directory if it doesn't exist
+end
+
+if ~exist('input/all', 'dir')  %for all folder - checking if it exists
+   mkdir('input/all');  %Creating directory for raw dataset
+end
+
+if ~exist('input/train', 'dir')  %for train - checking if it exists
+   mkdir('input/train');  %Creating directory for training images
+end
+
+if ~exist('input/test', 'dir')  %for test - checking if it exists
+   mkdir('input/test');  %Creating directory for testing images
+end
+
+if ~exist('output', 'dir')  %for output folder - checking if it exists
+   mkdir('output');  %Creating directory for output files and images
+end
+
+% Processing AT&T dataset - randomly split into training and test sets
+fprintf('Part 2.0 - Data Preprocessing:\n');  %Displaying header for this section
+
+% Processing the dataset
+try  %starting try catch to handle potential errors
+   processATTDataset();  %calling processATTDataset function to split dataset
+   
+   % Displaying three random training images to confirm data loading
+   try  %starting inner try catch for displaying faces
+       displayRandomFaces();  %calling displayRandomFaces function to show sample images
+   catch err  %Catching errors from displayRandomFaces
+       fprintf('Error displaying random faces: %s\n', err.message); %displaying an error message
+       fprintf('Continuing with the rest of the analysis...\n'); %displaying that line to indicate we'll proceed
+   end % the end of inner try catch 
+catch err  %Catching errors from processATTDataset
+   fprintf('Error in data preprocessing: %s\n', err.message);  %Displaying the error message
+   error('Cannot continue without proper dataset processing. Please check your AT&T dataset.');  %Stopping execution with error
+end  %ending the outer try catch 
+
+% 2.1 PCA Analysis
+
+% 2.1.a. Reading all training images and constructing matrix T
+[T, y_train_faces] = constructImageMatrix('input/train');  %Reading all training images into matrix T
+% Displaying T as an image
+figure;  %Creating a new figure window
+imshow(T, []);  %Displaying matrix T as an image with automatic scaling
+title('Matrix T Visualization');  %Adding title to the figure
+saveas(gcf, 'output/ps5-1-a.png');  %Saving the figure to output directory
+
+% 2.1.b. Computing average face vector m
+m = mean(T, 2);  % Average across rows - computing mean face vector
+m_img = reshape(m, [112, 92]);  % Resizing to original dimensions (112x92)
+figure;  %Creating a new figure window
+imshow(m_img, []);  %Displaying the mean face
+title('Mean Face');  %Adding title to the figure
+saveas(gcf, 'output/ps5-2-1-b.png');  %Saving the mean face image
+
+% 2.1.c. Finding the centered data matrix A and covariance matrix C
+A = T - m;  % Subtracting the mean from each column to center the data
+C = A * A';  % Computing covariance matrix using A*A'
+figure;  %Creating a new figure window
+imshow(C, []);  %Displaying the covariance matrix as an image
+title('Covariance Matrix');  %Adding title to the figure
+saveas(gcf, 'output/ps5-2-1-c.png');  %Saving the covariance matrix visualization
+
+% 2.1.d. Computing eigenvalues of A'*A for faster computation
+AtA = A' * A;  %Computing A'*A which is smaller than A*A' but has same non-zero eigenvalues
+eigenvalues = eig(AtA);  %Computing all eigenvalues of A'*A
+eigenvalues = sort(eigenvalues, 'descend');  % Sorting in descending order (largest first)
+
+% Computing percentage of variance explained by k eigenvectors
+total_variance = sum(eigenvalues);  %Calculating the total variance (sum of all eigenvalues)
+variance_explained = zeros(length(eigenvalues), 1);  %Initializing array to store percentage of variance
+
+for k = 1:length(eigenvalues)  %Starting loop for each possible k value
+   variance_explained(k) = sum(eigenvalues(1:k)) / total_variance;  %Calculating cumulative variance ratio
+end  %End of loop
+
+% Finding K that captures at least 95% of variance
+K = find(variance_explained >= 0.95, 1);  %Finding smallest k that explains 95% of variance
+
+% Plotting variance explained vs k
+figure;  %Creating a new figure window
+plot(1:length(eigenvalues), variance_explained, 'b-');  %Plotting variance explained curve
+hold on;  %Keeping current plot for additional elements
+plot(K, variance_explained(K), 'ro', 'MarkerSize', 10);  %Adding red circle at the 95% point
+grid on;  %Adding grid to the plot
+xlabel('Number of Eigenvectors (k)');  %Adding x-axis label
+ylabel('Variance Explained v(k)');  %Adding y-axis label
+title(sprintf('Variance Explained by k Eigenvectors (K = %d for 95%%)', K));  %Adding title with K value
+saveas(gcf, 'output/ps5-2-1-d.png');  %Saving the plot
+
+% 2.1.e. Retrieving K dominant eigenvectors of the covariance matrix
+% Using eigs for efficiency
+[U, D] = eigs(C, K);  %Computing the K largest eigenvalues and corresponding eigenvectors
+fprintf('Dimensions of matrix U: %d x %d\n', size(U, 1), size(U, 2));  %Printing the dimensions of U
+
+% Displaying first 9 eigenfaces
+figure;  %Creating a new figure window
+for i = 1:min(9, K)  %Starting loop to display up to 9 eigenfaces
+   subplot(3, 3, i);  %Creating a 3x3 grid and selecting the ith position
+   eigenface = reshape(U(:, i), [112, 92]);  %Reshaping the eigenvector to image dimensions
+   imshow(eigenface, []);  %Displaying the eigenface
+   title(sprintf('Eigenface %d', i));  %Adding title showing eigenface number
+end  %End of loop
+saveas(gcf, 'output/ps5-2-1-e.png');  %Saving the eigenfaces figure
+
+% 2.2 Feature Extraction for Face Recognition
+
+% 2.2.a. Project training images into eigenface space
+W_training = zeros(size(T, 2), K);  %Initializing matrix for training image projections
+for i = 1:size(T, 2)  %Starting loop for each training image
+   img_vec = T(:, i);  %Getting the current training image
+   W_training(i, :) = U' * (img_vec - m);  %Projecting image onto eigenface space
+end  %End of loop
+
+% 2.2.b. Project test images into eigenface space
+[T_test, y_test_faces] = constructImageMatrix('input/test');  %Reading all test images
+W_testing = zeros(size(T_test, 2), K);  %Initializing matrix for test image projections
+for i = 1:size(T_test, 2)  %Starting loop for each test image
+   img_vec = T_test(:, i);  %Getting the current test image
+   W_testing(i, :) = U' * (img_vec - m);  %Projecting image onto eigenface space
+end  %End of loop
+
+fprintf('Dimensions of W_training: %d x %d\n', size(W_training, 1), size(W_training, 2));  %Printing dimensions of training projections
+fprintf('Dimensions of W_testing: %d x %d\n', size(W_testing, 1), size(W_testing, 2));  %Printing dimensions of testing projections
+
+% 2.3 Face Recognition
+
+% 2.3.a. KNN Classification
+k_values = [1, 3, 5, 7, 9, 11];  %Defining different values of K to test for KNN
+knn_accuracies = zeros(size(k_values));  %Initializing array to store accuracies for each K
+
+fprintf('\nPart 2.3.a - KNN Classification Results:\n');  %Printing header for KNN results
+fprintf('K\tAccuracy (%%)\n');  %Printing column headers
+fprintf('----------------\n');  %Printing separator line
+
+for i = 1:length(k_values)  %Starting loop for each K value
+   k = k_values(i);  %Getting current K value
+   
+   % Training and testing KNN classifier
+   knn_model = fitcknn(W_training, y_train_faces, 'NumNeighbors', k);  %Training KNN model with current K
+   y_pred = predict(knn_model, W_testing);  %Predicting labels for test data
+   
+   % Calculating the accuracy
+   accuracy = sum(y_pred == y_test_faces) / length(y_test_faces) * 100;  %Calculating accuracy percentage
+   knn_accuracies(i) = accuracy;  %Storing accuracy for current K
+   
+   % Printing results
+   fprintf('%d\t%.2f\n', k, accuracy);  %Displaying K value and its accuracy
+end  %End of loop
+
+% 2.3.b. SVM Classification
+% Defining the parameters
+multiclass_types = {'OneVsOne', 'OneVsAll'};  %Two multiclass approaches to test
+kernel_types = {'linear', 'polynomial', 'rbf'};  %Three kernel types to test
+
+% Initializing result matrices
+svm_train_times = zeros(length(kernel_types), length(multiclass_types));  %Matrix for training times
+svm_accuracies = zeros(length(kernel_types), length(multiclass_types));  %Matrix for accuracies
+
+fprintf('\nPart 2.3.b - SVM Classification Results:\n');  %Printing header for SVM results
+
+for i = 1:length(kernel_types)  %Starting outer loop for kernel types
+   for j = 1:length(multiclass_types)  %Starting inner loop for multiclass approaches
+       kernel = kernel_types{i};  %Getting current kernel type
+       multiclass = multiclass_types{j};  %Getting current multiclass approach
+       
+       % Training SVM classifier and measuring time
+       fprintf('Training SVM with %s kernel and %s multiclass approach...\n', kernel, multiclass);  %Showing current configuration
+       
+       try  %Starting try-catch to handle potential errors
+           tic;  %Starting timer to measure training time
+           if strcmp(kernel, 'linear')  %If using linear kernel
+               % For linear kernel
+               svm_model = fitcecoc(W_training, y_train_faces, 'Learners', 'linear', 'Coding', multiclass);  %Creating linear SVM
+           elseif strcmp(kernel, 'polynomial')  %If using polynomial kernel
+               % For polynomial kernel - use direct parameter instead of setting property
+             
+               svm_template = templateSVM('KernelFunction', 'polynomial', 'PolynomialOrder', 3, 'KernelScale', 'auto', 'Standardize', true);  %Creating polynomial SVM template
+               svm_model = fitcecoc(W_training, y_train_faces, 'Learners', svm_template, 'Coding', multiclass);  %Training polynomial SVM
+           else  %If using rbf kernel
+               % For RBF kernel
+               svm_template = templateSVM('KernelFunction', kernel, 'KernelScale', 'auto', 'Standardize', true);  %Creating RBF SVM template
+               svm_model = fitcecoc(W_training, y_train_faces, 'Learners', svm_template, 'Coding', multiclass);  %Training RBF SVM
+           end  %End of if-else
+           train_time = toc;  %Stopping timer and getting training time
+           
+           % Testing SVM classifier
+           y_pred = predict(svm_model, W_testing);  %Predicting labels for test data
+           accuracy = sum(y_pred == y_test_faces) / length(y_test_faces) * 100;  %Calculating accuracy percentage
+           
+           % Storing results
+           svm_train_times(i, j) = train_time;  %Storing training time
+           svm_accuracies(i, j) = accuracy;  %Storing accuracy
+           
+           fprintf('  Training time: %.2f seconds\n', train_time);  %Displaying training time
+           fprintf('  Testing accuracy: %.2f%%\n', accuracy);  %Displaying accuracy
+           
+       catch err  %Catching any errors during SVM training/testing
+           fprintf('  Error with %s kernel and %s approach: %s\n', kernel, multiclass, err.message);  %Displaying error message
+           fprintf('  Skipping this combination and continuing...\n');  %Indicating we'll skip this combination
+           
+           % Setting default values for error cases
+           svm_train_times(i, j) = NaN;  %Setting training time to NaN for error case
+           svm_accuracies(i, j) = NaN;  %Setting accuracy to NaN for error case
+       end  %End of try-catch
+   end  %End of inner loop
+end  %End of outer loop
+
+% Displaying SVM results in tables
+fprintf('\nSVM Training Times (seconds):\n');  %Displaying that line as header for times table
+fprintf('Kernel\tOne-vs-One\tOne-vs-All\n'); %Displaying that line for column headers
+fprintf('----------------------------------\n'); %Displaying that line as separator
+for i = 1:length(kernel_types)  %Starting for loop to display each kernel's results
+   if isnan(svm_train_times(i, 1))  %Checking if there was an error for this kernel
+       fprintf('%s\tN/A\t\tN/A\n', kernel_types{i});  %Displaying N/A for error cases
+   else  %If no error occurred
+       fprintf('%s\t%.2f\t\t%.2f\n', kernel_types{i}, svm_train_times(i, 1), svm_train_times(i, 2));  %Displaying training times
+   end  %End of if-else
+end  %End of loop
+
+fprintf('\nSVM Testing Accuracies (%%):\n');  %Displaying header for accuracies table
+fprintf('Kernel\tOne-vs-One\tOne-vs-All\n');  %Displaying column headers
+fprintf('----------------------------------\n');  %Displaying separator line
+for i = 1:length(kernel_types)  %Starting loop to display each kernel's results
+   if isnan(svm_accuracies(i, 1))  %Checking if there was an error for this kernel
+       fprintf('%s\tN/A\t\tN/A\n', kernel_types{i});  %Displaying N/A for error cases
+   else  %If no error occurred
+       fprintf('%s\t%.2f\t\t%.2f\n', kernel_types{i}, svm_accuracies(i, 1), svm_accuracies(i, 2));  %Displaying accuracies
+   end  %End of if-else
+end  %End of loop
+
+% Part 3 - Case Study
+% This part is written response about credit risk prediction models
+% in the report pdf
+function y_predict = weightedKNN(X_train, y_train, X_test, sigma)
+% This is Weighted K-Nearest Neighbors classifier with Gaussian weights
+% Inputs:   X_train - m x (n+1) matrix, m training instances with n features.   y_train - m x 1 vector, labels for training instances
+%   X_test  - d x (n+1) matrix, d test instances with n features
+%   sigma   - scalar, bandwidth parameter for Gaussian weighting function
+% Outputs: y_predict - d x 1 vector, it is predicted labels for test instances
+
+% Getting the number of test instances
+num_test = size(X_test, 1);  %To get the number of rows in the matrix
+y_predict = zeros(num_test, 1); %Initializing the output vector y_predict as a column vector of zeros with length equal to the number of test instances 
+
+% For each test instance
+for i = 1:num_test  %Starting the for loop (outer loop)
+    % Computing Euclidean distances between test instance and all training instances
+    distances = pdist2(X_test(i,:), X_train); %The result is a vector of distances
+    
+    % Computing Gaussian weights based on distances
+    weights = exp(-(distances.^2) / (2 * sigma^2));
+    
+    % Getting unique class labels
+    unique_labels = unique(y_train); %the unique class labels in the training data
+    class_scores = zeros(length(unique_labels), 1);  %Initializing a vector to store the weighted vote for each unique class
+    
+    % Computing weighted vote for each class
+    for j = 1:length(unique_labels)  %starting the for loop (inner loop)
+        % Finding indices of training instances with the current class label
+        idx = (y_train == unique_labels(j));  %logical vector if true that means it indicates training instances belong to the current class if false indicates instances of other classes
+        
+        % Sum the weights for this class
+        class_scores(j) = sum(weights(idx));
+    end  %ending the of the inner loop
+    
+    % Choosing the class with the highest weighted vote
+    [~, max_idx] = max(class_scores); %we just need the index of the class with highest weighted vote
+    y_predict(i) = unique_labels(max_idx); %Assigning the predict class label for the current test instance
+end  %Ending the outer loop
+end  %Ending the function
