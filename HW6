@@ -1,0 +1,312 @@
+function g_prime = sigmoidGradient(z)
+    % SIGMOIDGRADIENT Compute the gradient of the sigmoid function
+    % g_prime = SIGMOIDGRADIENT(z) computes the gradient of the
+    % sigmoid function evaluated at z.
+    
+    % Getting the sigmoid values
+    g = sigmoid(z);  % First calculating sigmoid value at z
+    
+    % Computing gradient: g'(z) = g(z)(1-g(z))
+    g_prime = g .* (1 - g);  % Applying gradient formula: sigmoid(z) * (1-sigmoid(z))
+end
+function J = nnCost(Theta1, Theta2, X, y, K, lambda)
+    % NNCOST Compute the cost function for neural network
+    % J = NNCOST(Theta1, Theta2, X, y, K, lambda) computes the cost
+    % function J for the neural network with parameters Theta1 and Theta2.
+    
+    % Number of examples
+    m = size(X, 1);  % Get number of training examples
+    
+    % Adding ones to X as bias unit
+    X = [ones(m, 1), X];  % Add column of 1's as bias units
+    
+    % Converting y to one-hot encoding
+    y_onehot = zeros(m, K);  % Initialize one-hot encoding matrix
+    for i = 1:m  % Loop through each example
+        y_onehot(i, y(i)) = 1;  % Set corresponding class position to 1
+    end
+    
+    % Forward propagation
+    a1 = X;  % Input layer with bias
+    z2 = a1 * Theta1';  % Computing weighted sum for hidden layer
+    a2 = sigmoid(z2);  % Applying sigmoid activation to hidden layer
+    a2 = [ones(m, 1), a2];  % Adding bias units to hidden layer
+    z3 = a2 * Theta2';  % Computing weighted sum for output layer
+    a3 = sigmoid(z3);  % Applying sigmoid activation to output layer
+    h = a3;  % Storing the final hypothesis values
+    
+    % Computing cost using vectorized implementation for efficiency
+    cost = sum(sum((-y_onehot) .* log(h) - (1 - y_onehot) .* log(1 - h)));  % Cross-entropy loss
+    
+    % Adding regularization term (excluding bias term - first column)
+    reg_term = (lambda/(2*m)) * (sum(sum(Theta1(:,2:end).^2)) + sum(sum(Theta2(:,2:end).^2)));  % L2 regularization
+    
+    % the Final cost
+    J = (1/m) * cost + reg_term;  % Combining cost and regularization
+end
+function [p, h_x] = predict(Theta1, Theta2, X)
+    % PREDICT Predicts the class labels for each example in X
+    % [p, h_x] = PREDICT(Theta1, Theta2, X) outputs the predicted class labels p 
+    % and hypothesis values h_x for each input example in X.
+    
+    % Getting size information
+    [m, ~] = size(X);  % Getting the number of examples (rows) in X
+    
+    % Adding the bias term to input features
+    a1 = [ones(m, 1), X];  % Adding column of 1's as bias units to input layer
+    
+    % Calculateing hidden layer activations
+    z2 = a1 * Theta1';  % Computing input to hidden layer
+    a2 = sigmoid(z2);  % Applying sigmoid activation function
+    
+    % Adding bias term to hidden layer
+    a2 = [ones(m, 1), a2];  % Adding column of 1's as bias units to hidden layer
+    
+    % Calculating output layer activations
+    z3 = a2 * Theta2';  % Computing input to output layer
+    h_x = sigmoid(z3);  % Applying sigmoid activation function to get output
+    
+    % Getting the predicted class labels (from 1 to 3)
+    [~, p] = max(h_x, [], 2);  % Finding the index of maximum value in each row (prediction)
+end
+%Homework 6
+%Omar Morsy
+%ECE 1395
+
+% Creating output directory if it doesn't exist
+if ~exist('output', 'dir')  % Checking if the 'output' directory exists
+    mkdir('output');        % If it doesn't exist, create it
+end
+
+% Part 0: Data Loading and Preprocessing
+fprintf('Loading and Visualizing Data ...\n')  % Printing the message to console
+
+% Loading the data
+load('input/HW6_Data2_full.mat');  % Loading the dataset from the mat file
+
+% Displaying 16 random samples
+figure;  % Creating a new figure window
+sampleIndices = randperm(size(X, 1), 16);  % Generating 16 random indices from the dataset
+for i = 1:16  % Loop through all 16 samples
+    subplot(4, 4, i);  % Creating a 4x4 grid of subplots
+    
+    % Reshaping the 1024x1 vector back to 32x32 image
+    img = reshape(X(sampleIndices(i), :), 32, 32);  % Converting the 1D feature vector to a 2D image
+    
+    % Displaying image
+    imagesc(img);  % Displaying the grayscale image
+    colormap(gray);  % Using grayscale colormap
+    axis off;  % Hiding the axes
+    
+    % Adding title with the class label
+    if y_labels(sampleIndices(i)) == 1  % If class is 1
+        title('Airplane');  % Label as airplane
+    elseif y_labels(sampleIndices(i)) == 2  % If class is 2
+        title('Automobile');  % Label as automobile
+    else  % If class is 3
+        title('Truck');  % Label as truck
+    end
+end
+saveas(gcf, 'output/ps6-0-a-1.png');  % Saving the figure to output directory
+
+% Spliting data into training and testing sets
+fprintf('Splitting data into training and testing sets...\n');  % Printing message to console
+m = size(X, 1);  % Getting the number of examples in the dataset
+trainSize = 13000;  % Setting training set size to 13000
+testSize = 2000;  % Setting test set size to 2000
+
+% Randomly shuffle indices
+indices = randperm(m);  % Generating a random permutation of indices
+
+% Selecting training and testing indices
+trainIndices = indices(1:trainSize);  % Taking first 13000 for training
+testIndices = indices(end-testSize+1:end);  % Taking the last 2000 for testing
+
+% Creating training and testing sets
+X_train = X(trainIndices, :);  % Extracting training features
+y_train = y_labels(trainIndices);  % Extracting training labels
+X_test = X(testIndices, :);  % Extracting testing features
+y_test = y_labels(testIndices);  % Extracting testing labels
+
+fprintf('Training set size: %d samples\n', size(X_train, 1));  % Printing training set size
+fprintf('Testing set size: %d samples\n', size(X_test, 1));  % Printing testing set size
+
+% Part 1: Forward Propagation
+fprintf('\nPart 1: Testing the prediction function...\n');  % Printing message to console
+
+% Making sure the weights are loaded properly
+load('input/HW6_weights_3_full.mat');  % Loading pre-trained weights
+
+% Calling the predict function with all three arguments
+[pred, h_x] = predict(Theta1, Theta2, X);  % Getting predictions and hypothesis values
+
+accuracy = mean(double(pred == y_labels)) * 100;  % Calculating prediction accuracy percentage
+fprintf('Accuracy on entire dataset: %f%%\n', accuracy);  % Printing the accuracy
+
+% Part 2: Cost Function
+fprintf('\nPart 2: Testing the cost function...\n');  % Printing the message to console
+lambda_values_cost = [0.1, 1, 2];  % Set different regularization values to test
+cost_results = zeros(size(lambda_values_cost));  % Initialize array for cost results
+for i = 1:length(lambda_values_cost)  % Loop through each lambda value
+    cost = nnCost(Theta1, Theta2, X, y_labels, 3, lambda_values_cost(i));  % Calculating cost
+    cost_results(i) = cost;  % Store cost result
+    fprintf('Cost with lambda = %f: %f\n', lambda_values_cost(i), cost);  % Printing cost for this lambda
+end
+
+% Part 3: Sigmoid Gradient
+fprintf('\nPart 3: Testing sigmoid gradient...\n');  % Printing the message to console
+test_z = [-10; 0; 10];  % Testing values for sigmoid gradient
+g_prime = sigmoidGradient(test_z);  % Calculating sigmoid gradient
+fprintf('Sigmoid gradient for z = [-10; 0; 10]:\n');  % Printing message
+disp(g_prime);  % Displaying gradient values
+
+% Part 4: Stochastic Gradient Descent
+fprintf('\nPart 4: Starting stochastic gradient descent...\n');  % Printing message to console
+alpha = 0.01;  % Setting learning rate (reduced from 0.1)
+fprintf('Using learning rate (alpha) = %f\n', alpha);  % Printing learning rate
+
+% Part 5: Testing the network with different parameters
+fprintf('\nPart 5: Testing the neural network with different parameters...\n');  % Printing  message
+
+% Parameters to test
+lambda_values = [0.01, 0.1, 0.2, 1];  % Different regularization values
+epoch_values = [50, 300];  % Different epoch counts
+
+% Initializing result matrices
+results_train_accuracy = zeros(length(lambda_values), length(epoch_values));  % Matrix for training accuracy
+results_test_accuracy = zeros(length(lambda_values), length(epoch_values));  % Matrix for testing accuracy
+results_cost = zeros(length(lambda_values), length(epoch_values));  % Matrix for cost values
+
+% Loop through parameters
+for i = 1:length(lambda_values)  % For each lambda value
+    for j = 1:length(epoch_values)  % For each epoch count
+        lambda = lambda_values(i);  % Getting current lambda
+        epochs = epoch_values(j);  % Getting current epoch count
+        
+        fprintf('Training with lambda = %f, epochs = %d\n', lambda, epochs);  % Printing current parameters
+        
+        % Train the network
+        [Theta1_trained, Theta2_trained] = sGD(1024, 40, 3, X_train, y_train, lambda, alpha, epochs);  % Training with SGD
+        
+        % Computing training accuracy
+        [pred_train, ~] = predict(Theta1_trained, Theta2_trained, X_train);  % Getting predictions on training set
+        train_accuracy = mean(double(pred_train == y_train)) * 100;  % Calculating training accuracy
+        results_train_accuracy(i, j) = train_accuracy;  % Storing training accuracy
+        
+        % Computing testing accuracy
+        [pred_test, ~] = predict(Theta1_trained, Theta2_trained, X_test);  % Getting predictions on test set
+        test_accuracy = mean(double(pred_test == y_test)) * 100;  % Calculating testing accuracy
+        results_test_accuracy(i, j) = test_accuracy;  % Storing testing accuracy
+        
+        % Compute cost
+        cost = nnCost(Theta1_trained, Theta2_trained, X_train, y_train, 3, lambda);  % Calculating cost
+        results_cost(i, j) = cost;  % Store cost
+        
+        fprintf('Training accuracy: %f%%\n', train_accuracy);  % Printing training accuracy
+        fprintf('Testing accuracy: %f%%\n', test_accuracy);  % Printing testing accuracy
+        fprintf('Cost: %f\n\n', cost);  % Printing cost
+    end
+end
+
+% Displaying results in tables
+fprintf('Training Accuracy:\n');  % Printing header for training accuracy
+disp(results_train_accuracy);  % Displaying training accuracy table
+
+fprintf('Testing Accuracy:\n');  % Printing header for testing accuracy
+disp(results_test_accuracy);  % Displaying testing accuracy table
+
+fprintf('Cost:\n');  % Printing header for cost
+disp(results_cost);  % Displaying cost table
+
+% Part 6:  the Discussion is in the report
+
+function [Theta1, Theta2] = sGD(input_layer_size, hidden_layer_size, num_labels, X_train, y_train, lambda, alpha, MaxEpochs)
+    % SGD Performs stochastic gradient descent to learn Theta1 and Theta2
+    
+    % Initializing Theta1 and Theta2 randomly in range [-0.05, 0.05]
+    epsilon_init = 0.05;  % Set smaller initialization range for better convergence
+    Theta1 = rand(hidden_layer_size, input_layer_size + 1) * 2 * epsilon_init - epsilon_init;  % Random initialization for Theta1
+    Theta2 = rand(num_labels, hidden_layer_size + 1) * 2 * epsilon_init - epsilon_init;  % Random initialization for Theta2
+    
+    % Number of training examples
+    m = size(X_train, 1);  % Get number of training examples
+    
+    % Initializing cost history
+    J_history = zeros(MaxEpochs, 1);  % Array to store cost at each epoch
+    
+    % Reduced learning rate for better convergence
+    alpha = alpha * 0.1;  % Further reduce learning rate to help convergence
+    
+    for epoch = 1:MaxEpochs  % Loop through each epoch
+        % Loop through each training example
+        for i = 1:m  % Process one example at a time (stochastic)
+            % Getting current example
+            x = X_train(i, :);  % Getting feature vector for current example
+            
+            % Converting label to vector form (for backpropagation)
+            y_vector = zeros(num_labels, 1);  % Initialize one-hot encoding vector
+            y_vector(y_train(i)) = 1;  % Set corresponding class position to 1
+            
+            % Forward propagation
+            a1 = [1, x];  % Adding bias to input layer
+            z2 = a1 * Theta1';  % Computing input to hidden layer
+            a2 = sigmoid(z2);  % Applying sigmoid activation
+            a2 = [1, a2];  % Adding bias to hidden layer
+            z3 = a2 * Theta2';  % Computing input to output layer
+            a3 = sigmoid(z3);  % Applying sigmoid activation
+            
+            % Backpropagation - corrected implementation
+            % Output layer error
+            delta3 = a3' - y_vector;  % Computing the error at output layer
+            
+            % Hidden layer error (excluding bias unit)
+            delta2_input = Theta2' * delta3;  % Propagating error backwards
+            
+            % Only keep the non-bias terms and multiply by the gradient of z2
+            delta2 = delta2_input(2:end) .* sigmoidGradient(z2');  % Computing error at hidden layer
+            
+            % Computing gradients
+            Delta1 = delta2 * a1;  % Gradient for Theta1
+            Delta2 = delta3 * a2;  % Gradient for Theta2
+            
+            % Adding regularization (except for bias term)
+            D1 = Delta1;  % Copying Delta1 to D1
+            D2 = Delta2;  % Copying Delta2 to D2
+            
+            % Adding regularization to all terms except bias
+            D1(:, 2:end) = D1(:, 2:end) + lambda * Theta1(:, 2:end);  % Add regularization to non-bias terms
+            D2(:, 2:end) = D2(:, 2:end) + lambda * Theta2(:, 2:end);  % Add regularization to non-bias terms
+            
+            % Updating weights using stochastic gradient descent
+            Theta1 = Theta1 - alpha * D1;  % Updating weights for hidden layer
+            Theta2 = Theta2 - alpha * D2;  % Updating weights for output layer
+        end
+        
+        % Computing cost at the end of epoch for entire training set
+        J_history(epoch) = nnCost(Theta1, Theta2, X_train, y_train, num_labels, lambda);  % Calculate cost using current weights
+        
+        % Printing the cost every 10 epochs
+        if mod(epoch, 10) == 0  % Check if current epoch is divisible by 10
+            fprintf('Epoch %d | Cost: %f\n', epoch, J_history(epoch));  % Print epoch and cost
+        end
+    end
+    
+    % Plot cost history
+    figure;  % Creating new figure
+    plot(1:MaxEpochs, J_history);  % Plotting cost vs epoch
+    title('Cost vs. Iteration');  % Adding title
+    xlabel('Iteration');  % Adding x-axis label
+    ylabel('Cost');  % Adding y-axis label
+    grid on;  % Adding the grid
+    saveas(gcf, 'output/ps6-4-e-1.png');  % Saving the figure
+end
+function g = sigmoid(z)
+    % SIGMOID Compute sigmoid function
+    % g = SIGMOID(z) computes the sigmoid of z.
+    
+    % Ensuring z is a double for numerical stability
+    z = double(z);  % Converting the input to double precision
+    
+    % Computing sigmoid function
+    g = 1.0 ./ (1.0 + exp(-z));  % Applying sigmoid formula: 1/(1+e^(-z))
+end
